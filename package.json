@@ -1,0 +1,35 @@
+{
+  "name": "hodoor-ai",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Hodoor AI (حضور AI) – smart school attendance prototype using on-device face detection",
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/fetch-mediapipe.mjs",
+    "dev": "vite --host",
+    "prebuild": "node scripts/fetch-mediapipe.mjs",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host",
+    "test": "vitest run",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.2.3",
+    "idb": "^8.0.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.6"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "fake-indexeddb": "^6.2.8",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  }
+}

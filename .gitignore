@@ -1,0 +1,31 @@
+# Dependencies & build output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# MediaPipe WASM runtime is copied from node_modules at build time (≈29MB, not committed)
+public/mediapipe/wasm/
+
+# Secrets / environment
+.env
+.env.*
+*.pem
+*.key
+
+# Privacy: never commit personal photos, scans or exported experiment data
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.heif
+*.webp
+!public/icons/*.png
+hodoor-export-*.json
+exports/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
