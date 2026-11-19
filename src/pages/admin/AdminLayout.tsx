@@ -8,7 +8,7 @@ const items: Item[] = [
   { to: '/admin/students', key: 'students', end: true },
   { to: '/admin/students/new', key: 'newStudent' },
   { to: '/admin/classes', key: 'classes' },
-  { to: '', key: 'camera', phase: 4 },
+  { to: '', key: 'camera', phase: 5 },
   { to: '', key: 'tests', phase: 5 },
   { to: '', key: 'results', phase: 5 },
   { to: '/admin/settings', key: 'settings' },

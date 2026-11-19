@@ -6,7 +6,7 @@ export function HomePage() {
   const { t } = useI18n();
   const sections = [
     { title: t('home.adminTitle'), desc: t('home.adminDesc'), to: '/admin', phase: 2, ready: true },
-    { title: t('home.teacherTitle'), desc: t('home.teacherDesc'), to: '', phase: 3, ready: false },
+    { title: t('home.teacherTitle'), desc: t('home.teacherDesc'), to: '/teacher', phase: 3, ready: true },
   ];
   return (
     <main className="mx-auto max-w-5xl px-4 py-6">

@@ -8,6 +8,7 @@ import { Students } from '../pages/admin/Students';
 import { StudentForm } from '../pages/admin/StudentForm';
 import { Classes } from '../pages/admin/Classes';
 import { SystemSettings } from '../pages/admin/SystemSettings';
+import { LiveScan } from '../pages/teacher/LiveScan';
 
 // HashRouter: GitHub Pages serves static files only, so client routes live after "#".
 export function App() {
@@ -31,6 +32,7 @@ export function App() {
           <Route path="classes" element={<Classes />} />
           <Route path="settings" element={<SystemSettings />} />
         </Route>
+        <Route path="/teacher" element={<LiveScan />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </HashRouter>
