@@ -20,6 +20,7 @@ describe('i18n', () => {
   });
   it('resolves nested keys and fills placeholders', () => {
     expect(translate('ar', 'home.comingIn', { n: 2 })).toBe('قيد التطوير – المرحلة 2');
+    expect(translate('ar', 'settings.imported', { classes: 1, sections: 2, students: 3, testRuns: 0 })).toContain('3 طالب');
     expect(translate('en', 'home.comingIn', { n: 3 })).toBe('In development – phase 3');
   });
   it('returns the key for unknown entries instead of crashing', () => {

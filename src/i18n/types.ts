@@ -1,5 +1,6 @@
 import type { ar } from './ar';
 
-/** Arabic is the source of truth; English must provide every key. */
-export type Dict = { [K in keyof typeof ar]: (typeof ar)[K] extends string ? string : { [P in keyof (typeof ar)[K]]: string } };
+type Deep<T> = { [K in keyof T]: T[K] extends string ? string : Deep<T[K]> };
+/** Arabic is the source of truth; English must provide every key (checked by the compiler and tests). */
+export type Dict = Deep<typeof ar>;
 export type Lang = 'ar' | 'en';

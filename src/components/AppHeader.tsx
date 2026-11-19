@@ -5,7 +5,7 @@ export function AppHeader() {
   const { t, lang, setLang } = useI18n();
   return (
     <header className="bg-navy-900 text-white">
-      <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
         <div className="flex items-center gap-3">
           <Logo size={40} />
           <div>
