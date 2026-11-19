@@ -12,8 +12,12 @@ export interface Track {
   vy: number;
   score: number;
   hits: number;
-  /** Consecutive frames without a matching detection. */
+  /** Consecutive frames in which the face SHOULD have been seen but was not. */
   misses: number;
+  /** Frames since the last match (includes frames where its area was not analysed). */
+  unseen: number;
+  /** Pass that last found this face. */
+  source: 'full' | 'tile';
   confirmed: boolean;
   quality?: Quality;
   /** Frame counter of the last sharpness measurement. */
@@ -27,6 +31,13 @@ export interface TrackerOptions {
   confirmHits: number;
   /** Frames a track survives without detection (briefly shown red as "lost"). */
   maxMisses: number;
+  /** Hard limit on frames without any match (covers areas analysed only every few frames). */
+  maxUnseen: number;
+  /**
+   * A face still counts as visible while unseen for up to this many frames
+   * (0 without tiling; the tile-cycle length with round-robin tiling).
+   */
+  maxVisibleUnseen: number;
   /** Minimum IoU to match predicted box and detection. */
   minIoU: number;
   /** Fallback: max centre distance relative to face size (handles fast panning). */
@@ -38,6 +49,8 @@ export interface TrackerOptions {
 export const DEFAULT_TRACKER: TrackerOptions = {
   confirmHits: 3,
   maxMisses: 8,
+  maxUnseen: 8,
+  maxVisibleUnseen: 0,
   minIoU: 0.15,
   maxCenterDist: 0.9,
   smoothing: 0.65,
@@ -79,8 +92,17 @@ export class FaceTracker {
     this.frame = 0;
   }
 
-  /** Feed the detections of one processed frame. Returns the live track list. */
-  update(dets: Detection[]): Track[] {
+  /** Currently on screen: not missed, and seen recently enough. */
+  isVisible(t: Track): boolean {
+    return t.misses === 0 && t.unseen <= this.opt.maxVisibleUnseen;
+  }
+
+  /**
+   * Feed the detections of one processed frame. Returns the live track list.
+   * `expected(box)` says whether a face at that position COULD have been detected in this
+   * frame (with tiling, small faces are only analysed when their tile comes round).
+   */
+  update(dets: Detection[], expected: (b: Box) => boolean = () => true): Track[] {
     this.frame++;
     const { opt } = this;
 
@@ -121,8 +143,10 @@ export class FaceTracker {
       t.vx = 0.5 * t.vx + 0.5 * (now.cx - prev.cx);
       t.vy = 0.5 * t.vy + 0.5 * (now.cy - prev.cy);
       t.score = d.score;
+      t.source = d.source ?? 'full';
       t.hits++;
       t.misses = 0;
+      t.unseen = 0;
       if (!t.confirmed && t.hits >= opt.confirmHits) {
         t.confirmed = true;
         this.stats.uniqueFaces++;
@@ -132,14 +156,15 @@ export class FaceTracker {
     // 3) Unmatched tracks age; unmatched detections start new tracks.
     this.tracks.forEach((t, ti) => {
       if (usedT.has(ti)) return;
-      t.misses++;
       t.box = { ...t.box, x: t.box.x + t.vx, y: t.box.y + t.vy };
       t.vx *= 0.7;
       t.vy *= 0.7;
+      t.unseen++;
+      if (expected(t.box)) t.misses++;
     });
     const survivors: Track[] = [];
     for (const t of this.tracks) {
-      if (t.misses <= opt.maxMisses) survivors.push(t);
+      if (t.misses <= opt.maxMisses && t.unseen <= opt.maxUnseen) survivors.push(t);
       else if (t.confirmed) this.stats.lostEvents++;
     }
     dets.forEach((d, di) => {
@@ -152,6 +177,8 @@ export class FaceTracker {
         score: d.score,
         hits: 1,
         misses: 0,
+        unseen: 0,
+        source: d.source ?? 'full',
         confirmed: opt.confirmHits <= 1,
         lastSharpAt: -Infinity,
       });
@@ -159,7 +186,7 @@ export class FaceTracker {
     });
     this.tracks = survivors;
 
-    const visible = survivors.filter((t) => t.confirmed && t.misses === 0).length;
+    const visible = survivors.filter((t) => t.confirmed && this.isVisible(t)).length;
     this.stats.maxSimultaneous = Math.max(this.stats.maxSimultaneous, visible);
     return survivors;
   }

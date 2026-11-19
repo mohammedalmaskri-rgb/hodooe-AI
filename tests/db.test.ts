@@ -134,6 +134,19 @@ describe('reference photo', () => {
   });
 });
 
+describe('reference photo is trial-student only', () => {
+  it('refuses photos for any other student, and keeps TEST-001 if it has a photo', async () => {
+    const { s, classRoom, section } = await trialStudent();
+    const other = await createStudent(db, { name: 'طالب', studentNo: 'S-002', classId: classRoom.id, sectionId: section.id });
+    expect(await code(savePhoto(db, other.id, fakeImage(), true))).toBe('photoTrialOnly');
+    await savePhoto(db, s.id, fakeImage(), true);
+    const input = { name: s.name, studentNo: 'S-003', classId: classRoom.id, sectionId: section.id };
+    expect(await code(updateStudent(db, s.id, input))).toBe('photoTrialOnly');
+    await deletePhoto(db, s.id);
+    expect((await updateStudent(db, s.id, input)).studentNo).toBe('S-003');
+  });
+});
+
 describe('admin PIN', () => {
   it('stores only a salted hash and verifies', async () => {
     expect(await hasPin(db)).toBe(false);

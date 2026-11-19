@@ -2,6 +2,7 @@ import type { HodoorDB } from './db';
 import { DataError } from './errors';
 import type { Student } from './types';
 import { newId } from '../lib/id';
+import { TRIAL_STUDENT_NO } from './photos';
 
 export interface StudentInput {
   name: string;
@@ -49,6 +50,8 @@ export async function updateStudent(db: HodoorDB, id: string, input: StudentInpu
   const current = await db.get('students', id);
   if (!current) throw new DataError('studentNotFound');
   const v = await validate(db, input, id);
+  // A student that has a reference photo must stay the trial student.
+  if (v.studentNo !== TRIAL_STUDENT_NO && (await db.count('photos', id)) > 0) throw new DataError('photoTrialOnly');
   const s: Student = { ...current, ...v, updatedAt: Date.now() };
   await db.put('students', s);
   return s;

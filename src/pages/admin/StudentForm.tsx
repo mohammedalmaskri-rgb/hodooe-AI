@@ -8,6 +8,7 @@ import { useI18n } from '../../i18n/I18nProvider';
 import { useErrorText } from '../../lib/useErrorText';
 import { Alert, Button, Card, ConfirmDialog, Field, inputClass, PageTitle } from '../../components/ui';
 import { PhotoManager } from './PhotoManager';
+import { TRIAL_STUDENT_NO } from '../../db/photos';
 
 const TRIAL_STUDENT = { name: 'محمد – طالب تجريبي 001', studentNo: 'TEST-001' };
 const empty: StudentInput = { name: '', studentNo: '', classId: '', sectionId: '', notes: '' };
@@ -28,6 +29,7 @@ export function StudentForm() {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [savedNo, setSavedNo] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -39,6 +41,7 @@ export function StudentForm() {
         const s = await getStudent(db, id);
         if (!s) throw new Error(t('errors.studentNotFound'));
         setForm({ name: s.name, studentNo: s.studentNo, classId: s.classId, sectionId: s.sectionId, notes: s.notes ?? '' });
+        setSavedNo(s.studentNo);
       } else if ((await listStudents(db)).length === 0) {
         // First student: pre-fill the trial student described in the requirements.
         const trialClass = cls.find((c) => c.name === TRIAL_CLASS_NAME);
@@ -67,7 +70,8 @@ export function StudentForm() {
         const s = await createStudent(db, form);
         navigate(`/admin/students/${s.id}`, { replace: true, state: { created: true } });
       } else {
-        await updateStudent(db, id, form);
+        const u = await updateStudent(db, id, form);
+        setSavedNo(u.studentNo);
         setMessage(t('common.saved'));
       }
     } catch (err) {
@@ -204,9 +208,13 @@ export function StudentForm() {
         <Card>
           <p className="text-sm text-slate-600">{t('photo.saveStudentFirst')}</p>
         </Card>
-      ) : (
+      ) : savedNo === TRIAL_STUDENT_NO ? (
         <PhotoManager studentId={id} />
-      )}
+      ) : savedNo ? (
+        <Card>
+          <p className="text-sm text-slate-600">{t('photo.trialOnly')}</p>
+        </Card>
+      ) : null}
 
       <ConfirmDialog
         open={confirmDelete}

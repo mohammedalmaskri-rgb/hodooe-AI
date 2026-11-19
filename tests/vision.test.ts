@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FaceTracker, iou } from '../src/vision/tracker';
+import { DEFAULT_TRACKER, FaceTracker, iou } from '../src/vision/tracker';
 import { classifyFace, measurePixels } from '../src/vision/quality';
 import { RollingMetrics } from '../src/vision/metrics';
 import { mapContain, mapCover } from '../src/vision/geometry';
@@ -111,5 +111,67 @@ describe('metrics & geometry', () => {
     expect(r.w).toBeCloseTo(400);
     expect(r.h).toBeCloseTo(225);
     expect(r.y).toBeCloseTo(287.5);
+  });
+});
+
+import { computeTiles, fullFrameMinFace, iom, mergeDetections, touchesInnerEdge } from '../src/vision/tiles';
+
+describe('tiling', () => {
+  it('3×2 overlapping tiles cover the whole 1280×720 frame', () => {
+    const tiles = computeTiles(1280, 720, 3, 2, 0.2);
+    expect(tiles).toHaveLength(6);
+    expect(Math.min(...tiles.map((t) => t.x))).toBe(0);
+    expect(Math.max(...tiles.map((t) => t.x + t.w))).toBe(1280);
+    expect(Math.max(...tiles.map((t) => t.y + t.h))).toBe(720);
+    // neighbours overlap
+    expect(tiles[0].x + tiles[0].w).toBeGreaterThan(tiles[1].x);
+    // a tile is ~2.6× narrower than the frame → faces ~2.6× larger for the model
+    expect(1280 / tiles[0].w).toBeGreaterThan(2.5);
+  });
+
+  it('flags faces cut at inner tile edges only', () => {
+    const [t0] = computeTiles(1280, 720, 3, 2, 0.2); // top-left tile
+    expect(touchesInnerEdge({ x: 0, y: 10, w: 40, h: 40 }, t0, 1280, 720)).toBe(false); // frame edge
+    expect(touchesInnerEdge({ x: t0.w - 30, y: 10, w: 30, h: 40 }, t0, 1280, 720)).toBe(true); // inner edge
+  });
+
+  it('merges the same face found by full frame and tile', () => {
+    const full = { x: 100, y: 100, w: 50, h: 50, score: 0.7, source: 'full' as const };
+    const tile = { x: 102, y: 98, w: 48, h: 52, score: 0.9, source: 'tile' as const };
+    const other = { x: 400, y: 100, w: 20, h: 20, score: 0.8, source: 'tile' as const };
+    const m = mergeDetections([full, tile, other]);
+    expect(m).toHaveLength(2);
+    expect(m[0]).toBe(tile);
+    expect(iom({ x: 0, y: 0, w: 10, h: 10 }, { x: 0, y: 0, w: 100, h: 100 })).toBe(1);
+  });
+
+  it('full-frame minimum face size grows with resolution', () => {
+    expect(fullFrameMinFace(1280, 720)).toBeCloseTo(80);
+    expect(fullFrameMinFace(1920, 1080)).toBeCloseTo(120);
+  });
+
+  it('tracker keeps a far face alive between its tile visits without counting it again', () => {
+    const tr = new FaceTracker({ ...DEFAULT_TRACKER, maxVisibleUnseen: 6, maxUnseen: 14 });
+    const far = { x: 900, y: 500, w: 22, h: 22, score: 0.8, source: 'tile' as const };
+    // seen only every 6th frame (round-robin of 6 tiles); not expected in between
+    for (let f = 0; f < 60; f++) {
+      const visit = f % 6 === 0;
+      tr.update(visit ? [far] : [], () => visit);
+    }
+    expect(tr.stats.uniqueFaces).toBe(1);
+    expect(tr.stats.lostEvents).toBe(0);
+    expect(tr.tracks[0].misses).toBe(0);
+    expect(tr.isVisible(tr.tracks[0])).toBe(true);
+  });
+
+  it('a ghost (face gone, small, not re-checked) stops counting as visible within one cycle', () => {
+    const tr = new FaceTracker({ ...DEFAULT_TRACKER, maxVisibleUnseen: 6, maxUnseen: 14 });
+    const far = { x: 900, y: 500, w: 22, h: 22, score: 0.8 };
+    for (let f = 0; f < 3; f++) tr.update([far]);
+    for (let f = 0; f < 7; f++) tr.update([], () => false); // its tile never came round
+    expect(tr.isVisible(tr.tracks[0])).toBe(false);
+    for (let f = 0; f < 10; f++) tr.update([], () => false);
+    expect(tr.tracks).toHaveLength(0); // removed after maxUnseen
+    expect(tr.stats.lostEvents).toBe(1);
   });
 });

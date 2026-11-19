@@ -11,7 +11,8 @@ export class DataError extends Error {
       | 'sectionHasStudents'
       | 'duplicateName'
       | 'studentNotFound'
-      | 'invalidImport',
+      | 'invalidImport'
+      | 'photoTrialOnly',
     message?: string,
   ) {
     super(message ?? code);

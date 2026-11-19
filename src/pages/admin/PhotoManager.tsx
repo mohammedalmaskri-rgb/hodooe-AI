@@ -90,6 +90,8 @@ export function PhotoManager({ studentId, onChange }: { studentId: string; onCha
     <Card>
       <h2 className="text-lg font-bold">{t('photo.title')}</h2>
       <p className="mt-1 text-xs text-slate-500">{t('photo.hint')}</p>
+      <p className="mt-1 text-xs text-slate-500">{t('photo.trialOnly')}</p>
+      <p className="mt-1 text-xs font-semibold text-navy-800">{t('photo.separate')}</p>
 
       {/* Hidden native pickers. "capture" opens the camera directly on iPhone/iPad. */}
       <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={onPick} data-testid="photo-upload" />

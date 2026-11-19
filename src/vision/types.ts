@@ -9,6 +9,8 @@ export interface Box {
 /** One raw face detection from MediaPipe for a single frame. */
 export interface Detection extends Box {
   score: number;
+  /** Which pass found it: whole frame or a tile (far-face mode). */
+  source?: 'full' | 'tile';
 }
 
 export type QualityLevel = 'green' | 'yellow' | 'red';

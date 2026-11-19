@@ -1,5 +1,6 @@
 import type { Resolution } from '../../camera/camera';
 import type { DelegateKind, ModelKind } from '../../vision/detector';
+import type { FarMode } from '../../vision/scanEngine';
 
 // Scan settings belong to the scanning device (the phone), so they are kept in its local storage.
 
@@ -7,10 +8,12 @@ export interface ScanSettings {
   model: ModelKind;
   delegate: DelegateKind;
   resolution: Resolution;
+  /** Far-face tiling mode. */
+  far: FarMode;
 }
 
 const KEY = 'hodoor.scanSettings';
-export const DEFAULT_SCAN_SETTINGS: ScanSettings = { model: 'full', delegate: 'CPU', resolution: '720' };
+export const DEFAULT_SCAN_SETTINGS: ScanSettings = { model: 'full', delegate: 'CPU', resolution: '720', far: 'balanced' };
 
 export function loadScanSettings(): ScanSettings {
   try {
@@ -19,6 +22,7 @@ export function loadScanSettings(): ScanSettings {
       model: raw.model === 'short' ? 'short' : raw.model === 'full' ? 'full' : DEFAULT_SCAN_SETTINGS.model,
       delegate: raw.delegate === 'GPU' ? 'GPU' : 'CPU',
       resolution: raw.resolution === '1080' ? '1080' : '720',
+      far: raw.far === 'off' || raw.far === 'max' || raw.far === 'balanced' ? raw.far : DEFAULT_SCAN_SETTINGS.far,
     };
   } catch {
     return DEFAULT_SCAN_SETTINGS;

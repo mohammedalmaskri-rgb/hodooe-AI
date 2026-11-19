@@ -1,0 +1,209 @@
+[
+ {
+  "mode": "off",
+  "fps": "25.2",
+  "ms": "32.5",
+  "segs": {
+   "pan s1": {
+    "truth": 3,
+    "avg": 1.85,
+    "max": 2,
+    "newIds": 3
+   },
+   "pan s2": {
+    "truth": 3,
+    "avg": 1.77,
+    "max": 2,
+    "newIds": 3
+   },
+   "pan s3": {
+    "truth": 3,
+    "avg": 1.92,
+    "max": 3,
+    "newIds": 2
+   },
+   "pan s4": {
+    "truth": 4,
+    "avg": 2.69,
+    "max": 3,
+    "newIds": 3
+   },
+   "pan s5": {
+    "truth": 6,
+    "avg": 2.92,
+    "max": 4,
+    "newIds": 4
+   },
+   "pan s6": {
+    "truth": 4,
+    "avg": 2.08,
+    "max": 3,
+    "newIds": 3
+   },
+   "medium s4": {
+    "truth": 4,
+    "avg": 4,
+    "max": 4,
+    "newIds": 4
+   },
+   "medium s6": {
+    "truth": 4,
+    "avg": 4,
+    "max": 4,
+    "newIds": 3
+   },
+   "far s5": {
+    "truth": 6,
+    "avg": 0,
+    "max": 0,
+    "newIds": 0
+   },
+   "far s3": {
+    "truth": 3,
+    "avg": 2,
+    "max": 2,
+    "newIds": 2
+   }
+  },
+  "overCount": 0,
+  "totalUnique": 29
+ },
+ {
+  "mode": "balanced",
+  "fps": "18.4",
+  "ms": "52.3",
+  "segs": {
+   "pan s1": {
+    "truth": 3,
+    "avg": 1.77,
+    "max": 2,
+    "newIds": 5
+   },
+   "pan s2": {
+    "truth": 3,
+    "avg": 1.67,
+    "max": 2,
+    "newIds": 1
+   },
+   "pan s3": {
+    "truth": 3,
+    "avg": 1.92,
+    "max": 2,
+    "newIds": 2
+   },
+   "pan s4": {
+    "truth": 4,
+    "avg": 2.75,
+    "max": 3,
+    "newIds": 3
+   },
+   "pan s5": {
+    "truth": 6,
+    "avg": 3,
+    "max": 4,
+    "newIds": 4
+   },
+   "pan s6": {
+    "truth": 4,
+    "avg": 2.15,
+    "max": 4,
+    "newIds": 7
+   },
+   "medium s4": {
+    "truth": 4,
+    "avg": 3.63,
+    "max": 4,
+    "newIds": 0
+   },
+   "medium s6": {
+    "truth": 4,
+    "avg": 3.56,
+    "max": 4,
+    "newIds": 3
+   },
+   "far s5": {
+    "truth": 6,
+    "avg": 4.43,
+    "max": 5,
+    "newIds": 5
+   },
+   "far s3": {
+    "truth": 3,
+    "avg": 2.67,
+    "max": 3,
+    "newIds": 1
+   }
+  },
+  "overCount": 0,
+  "totalUnique": 33
+ },
+ {
+  "mode": "max",
+  "fps": "6.8",
+  "ms": "150.4",
+  "segs": {
+   "pan s1": {
+    "truth": 3,
+    "avg": 1.5,
+    "max": 2,
+    "newIds": 3
+   },
+   "pan s2": {
+    "truth": 3,
+    "avg": 1.67,
+    "max": 2,
+    "newIds": 3
+   },
+   "pan s3": {
+    "truth": 3,
+    "avg": 1.73,
+    "max": 2,
+    "newIds": 2
+   },
+   "pan s4": {
+    "truth": 4,
+    "avg": 2.58,
+    "max": 3,
+    "newIds": 3
+   },
+   "pan s5": {
+    "truth": 6,
+    "avg": 2.73,
+    "max": 4,
+    "newIds": 4
+   },
+   "pan s6": {
+    "truth": 4,
+    "avg": 1.9,
+    "max": 3,
+    "newIds": 3
+   },
+   "medium s4": {
+    "truth": 4,
+    "avg": 4,
+    "max": 4,
+    "newIds": 4
+   },
+   "medium s6": {
+    "truth": 4,
+    "avg": 3.43,
+    "max": 4,
+    "newIds": 4
+   },
+   "far s5": {
+    "truth": 6,
+    "avg": 4.88,
+    "max": 5,
+    "newIds": 5
+   },
+   "far s3": {
+    "truth": 3,
+    "avg": 3,
+    "max": 3,
+    "newIds": 1
+   }
+  },
+  "overCount": 0,
+  "totalUnique": 32
+ }
+]

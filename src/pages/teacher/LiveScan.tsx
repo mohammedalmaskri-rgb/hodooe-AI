@@ -29,7 +29,7 @@ export function LiveScan() {
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<LiveScanEngine | null>(null);
   const camRef = useRef<OpenedCamera | null>(null);
-  const detRef = useRef<{ key: string; loaded: LoadedDetector } | null>(null);
+  const detRef = useRef<{ key: string; loaded: LoadedDetector; tile?: LoadedDetector } | null>(null);
   const wakeRef = useRef<WakeLockSentinelLike | null>(null);
   const phaseRef = useRef<Phase>('setup');
 
@@ -46,6 +46,7 @@ export function LiveScan() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loadingMsg, setLoadingMsg] = useState('');
+  const [copied, setCopied] = useState(false);
 
   const { data: classes, reload } = useLoad(async () => {
     const db = await getDB();
@@ -87,12 +88,18 @@ export function LiveScan() {
         setLoadingMsg(t('scan.loadingModel'));
         // Load the model (cached between sessions) and open the camera in parallel.
         const detPromise = (async () => {
-          if (detRef.current?.key === key) return { ...detRef.current.loaded, loadMs: 0 };
-          detRef.current?.loaded.detector.close();
+          const cached = detRef.current;
+          if (cached?.key === key && (settings.far === 'off' || cached.tile)) return { ...cached.loaded, loadMs: 0, tile: cached.tile };
+          cached?.loaded.detector.close();
+          cached?.tile?.detector.close();
           detRef.current = null;
-          const loaded = await loadDetector({ model: settings.model, delegate: settings.delegate, minConfidence: 0.4 });
-          detRef.current = { key, loaded };
-          return loaded;
+          const base = { model: settings.model, delegate: settings.delegate, minConfidence: 0.4 };
+          const [loaded, tile] = await Promise.all([
+            loadDetector(base),
+            settings.far === 'off' ? undefined : loadDetector({ ...base, runningMode: 'IMAGE' }),
+          ]);
+          detRef.current = { key, loaded, tile };
+          return { ...loaded, tile };
         })().catch((e) => {
           throw new Error(t('scan.errors.model', { msg: e instanceof Error ? e.message : String(e) }));
         });
@@ -105,7 +112,10 @@ export function LiveScan() {
         if (det.delegate !== settings.delegate) setNotice(t('scan.gpuFallback'));
         setCamInfo({ startMs: cam.startMs, modelMs: det.loadMs, delegate: det.delegate, facing: cam.facingMode });
         cam.track.addEventListener('ended', () => stopAll('ended'));
-        const engine = new LiveScanEngine(video, overlayRef.current!, det.detector, setStats, reasonLabel);
+        const engine = new LiveScanEngine(video, overlayRef.current!, det.detector, setStats, reasonLabel, {
+          mode: settings.far,
+          tileDetector: det.tile?.detector,
+        });
         engineRef.current = engine;
         engine.start();
         setPhase('live');
@@ -146,7 +156,13 @@ export function LiveScan() {
   }, [stopAll]);
 
   // Release the model when leaving the teacher view.
-  useEffect(() => () => detRef.current?.loaded.detector.close(), []);
+  useEffect(
+    () => () => {
+      detRef.current?.loaded.detector.close();
+      detRef.current?.tile?.detector.close();
+    },
+    [],
+  );
 
   const begin = () => {
     setError('');
@@ -160,6 +176,47 @@ export function LiveScan() {
     const next = { ...settings, ...patch };
     setSettings(next);
     saveScanSettings(next);
+  };
+
+  /** Plain-text report of the measured session (numbers only – no images, no identities). */
+  const copyReport = async () => {
+    if (!stats) return;
+    const report = {
+      app: `Hodoor AI ${__APP_VERSION__}`,
+      date: new Date().toISOString(),
+      userAgent: navigator.userAgent,
+      screen: `${screen.width}x${screen.height}@${devicePixelRatio}`,
+      settings,
+      delegateUsed: camInfo?.delegate,
+      cameraFacing: camInfo?.facing ?? 'unknown',
+      cameraStartMs: Math.round(camInfo?.startMs ?? 0),
+      modelLoadMs: Math.round(camInfo?.modelMs ?? 0),
+      firstFaceMs: stats.firstFaceMs === undefined ? null : Math.round(stats.firstFaceMs),
+      durationS: Math.round(stats.elapsedMs / 1000),
+      framesAnalysed: stats.frames,
+      avgFrameMs: +stats.sessionAvgMs.toFixed(1),
+      p95FrameMs: +stats.p95Ms.toFixed(1),
+      lastFps: stats.fps,
+      resolution: `${stats.videoW}x${stats.videoH}`,
+      distinctFaces: stats.uniqueFaces,
+      maxSimultaneous: stats.maxSimultaneous,
+      lostEvents: stats.lostEvents,
+      stoppedReason: notice || 'user',
+    };
+    const text = JSON.stringify(report, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Fallback for browsers without async clipboard permission.
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
   };
 
   const lightLabel = (b?: number) =>
@@ -234,6 +291,9 @@ export function LiveScan() {
               {t('scan.stats.p95')}: <bdi dir="ltr">{s ? `${s.p95Ms.toFixed(0)} ms` : '—'}</bdi>
             </span>
             <span>{camInfo?.delegate}</span>
+            <span>
+              {t('scan.stats.tiles')}: <bdi dir="ltr">{s ? `${s.inferencesPerFrame}× · ${s.facesViaTiles}` : '—'}</bdi>
+            </span>
           </div>
           <button
             type="button"
@@ -275,6 +335,8 @@ export function LiveScan() {
               [t('scan.stats.modelMs'), fmtMs(camInfo?.modelMs)],
               [t('scan.stats.firstFace'), fmtMs(stats.firstFaceMs)],
               [t('scan.stats.resolution'), `${stats.videoW}×${stats.videoH}`],
+              [t('scan.far'), t(`scan.far${settings.far === 'off' ? 'Off' : settings.far === 'max' ? 'Max' : 'Balanced'}`)],
+              [t('scan.model'), settings.model === 'full' ? t('scan.modelFull') : t('scan.modelShort')],
             ].map(([k, v]) => (
               <div key={String(k)} className="flex flex-col">
                 <dt className="text-xs text-slate-500">{k}</dt>
@@ -286,6 +348,9 @@ export function LiveScan() {
           </dl>
           <p className="mt-3 text-xs text-slate-500">{t('scan.uniqueHint')}</p>
           <p className="mt-1 text-xs text-slate-500">{t('scan.summaryNote')}</p>
+          <Button variant="secondary" className="mt-3 w-full" onClick={copyReport}>
+            {copied ? t('scan.copied') : t('scan.copyReport')}
+          </Button>
         </Card>
       )}
 
@@ -350,6 +415,7 @@ export function LiveScan() {
               [
                 ['model', t('scan.model'), [['full', t('scan.modelFull')], ['short', t('scan.modelShort')]]],
                 ['delegate', t('scan.delegate'), [['CPU', 'CPU'], ['GPU', 'GPU']]],
+                ['far', t('scan.far'), [['off', t('scan.farOff')], ['balanced', t('scan.farBalanced')], ['max', t('scan.farMax')]]],
                 ['resolution', t('scan.resolution'), [['720', '720p'], ['1080', '1080p']]],
               ] as const
             ).map(([key, label, opts]) => (

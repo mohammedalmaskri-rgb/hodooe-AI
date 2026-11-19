@@ -7,6 +7,8 @@ export interface DetectorConfig {
   model: ModelKind;
   delegate: DelegateKind;
   minConfidence: number;
+  /** VIDEO for the live full-frame pass, IMAGE for independent tile crops. */
+  runningMode?: 'VIDEO' | 'IMAGE';
 }
 
 export interface LoadedDetector {
@@ -28,7 +30,7 @@ export async function loadDetector(cfg: DetectorConfig): Promise<LoadedDetector>
   const make = (delegate: DelegateKind) =>
     FaceDetector.createFromOptions(fileset, {
       baseOptions: { modelAssetPath: asset(`./mediapipe/models/blaze_face_${cfg.model}_range.tflite`), delegate },
-      runningMode: 'VIDEO',
+      runningMode: cfg.runningMode ?? 'VIDEO',
       minDetectionConfidence: cfg.minConfidence,
       minSuppressionThreshold: 0.3,
     });

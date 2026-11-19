@@ -1,9 +1,26 @@
 import type { FaceDetector } from '@mediapipe/tasks-vision';
-import { FaceTracker, type Track } from './tracker';
+import { DEFAULT_TRACKER, FaceTracker, type Track } from './tracker';
 import { classifyFace, DEFAULT_THRESHOLDS, measurePixels } from './quality';
 import { RollingMetrics } from './metrics';
 import { mapContain } from './geometry';
-import type { Detection, QualityLevel, QualityReason } from './types';
+import type { Box, Detection, QualityLevel, QualityReason } from './types';
+import { computeTiles, fullFrameMinFace, mergeDetections, touchesInnerEdge, type Tile } from './tiles';
+
+export type FarMode = 'off' | 'balanced' | 'max';
+
+export interface TilingConfig {
+  mode: FarMode;
+  /** Second detector (IMAGE mode) used on tile crops; required unless mode is 'off'. */
+  tileDetector?: FaceDetector;
+  cols?: number;
+  rows?: number;
+  overlap?: number;
+  /**
+   * Minimum confidence for detections found in tiles. Measured on the test feed: real faces in
+   * tiles scored 0.64–0.90, false positives (hair/poster edges at higher zoom) 0.41–0.51.
+   */
+  tileMinScore?: number;
+}
 
 // Live scan loop: every new video frame is analysed in memory, drawn as boxes, and dropped.
 // Nothing is stored, recorded or sent anywhere: the only state kept is numbers
@@ -27,6 +44,10 @@ export interface ScanStats {
   elapsedMs: number;
   videoW: number;
   videoH: number;
+  /** Model runs per processed frame (1 = full frame only). */
+  inferencesPerFrame: number;
+  /** Visible faces currently found only thanks to tiles. */
+  facesViaTiles: number;
 }
 
 const COLORS: Record<QualityLevel, string> = { green: '#22c55e', yellow: '#facc15', red: '#ef4444' };
@@ -40,7 +61,7 @@ type FrameCallbackVideo = HTMLVideoElement & {
 };
 
 export class LiveScanEngine {
-  readonly tracker = new FaceTracker();
+  readonly tracker: FaceTracker;
   readonly metrics = new RollingMetrics();
   private running = false;
   private handle = 0;
@@ -52,6 +73,12 @@ export class LiveScanEngine {
   private lastStatsAt = 0;
   private sampler: CanvasRenderingContext2D;
   private samplerCanvas: HTMLCanvasElement;
+  private tileCanvas: HTMLCanvasElement | null = null;
+  private tileCtx: CanvasRenderingContext2D | null = null;
+  private tiles: Tile[] = [];
+  private tilesFor = '';
+  private tileCursor = 0;
+  private lastInferences = 1;
 
   constructor(
     private video: FrameCallbackVideo,
@@ -59,7 +86,21 @@ export class LiveScanEngine {
     private detector: FaceDetector,
     private onStats: (s: ScanStats) => void,
     private reasonLabel: (r: QualityReason) => string,
+    private tiling: TilingConfig = { mode: 'off' },
   ) {
+    // With round-robin tiling a small face is re-checked once per cycle, so the
+    // visibility/lost timeouts scale with the cycle length.
+    const cycle = tiling.mode === 'balanced' ? (tiling.cols ?? 3) * (tiling.rows ?? 2) : 0;
+    this.tracker = new FaceTracker({
+      ...DEFAULT_TRACKER,
+      maxVisibleUnseen: cycle,
+      maxUnseen: Math.max(DEFAULT_TRACKER.maxMisses, 2 * cycle + 2),
+    });
+    if (tiling.mode !== 'off') {
+      if (!tiling.tileDetector) throw new Error('tileDetector required for tiling');
+      this.tileCanvas = document.createElement('canvas');
+      this.tileCtx = this.tileCanvas.getContext('2d');
+    }
     this.samplerCanvas = document.createElement('canvas');
     this.samplerCanvas.width = CROP;
     this.samplerCanvas.height = CROP;
@@ -75,6 +116,8 @@ export class LiveScanEngine {
     this.metrics.reset();
     this.startedAt = performance.now();
     this.firstFaceMs = undefined;
+    // Development-only hook for diagnosing tracking (stripped from production builds).
+    if (import.meta.env.DEV) (window as unknown as { __hodoorEngine?: LiveScanEngine }).__hodoorEngine = this;
     this.schedule();
   }
 
@@ -85,6 +128,7 @@ export class LiveScanEngine {
     const ctx = this.overlay.getContext('2d');
     ctx?.clearRect(0, 0, this.overlay.width, this.overlay.height);
     this.samplerCanvas.width = this.samplerCanvas.height = 0; // free memory
+    if (this.tileCanvas) this.tileCanvas.width = this.tileCanvas.height = 0;
   }
 
   /** Final numbers for the session summary. */
@@ -124,25 +168,58 @@ export class LiveScanEngine {
     const ts = Math.max(t0, this.lastTs + 1); // MediaPipe needs strictly increasing timestamps
     this.lastTs = ts;
 
-    const result = this.detector.detectForVideo(v, ts);
-    const dets: Detection[] = [];
-    for (const d of result.detections) {
-      const b = d.boundingBox;
-      if (!b) continue;
-      const x = Math.max(0, b.originX);
-      const y = Math.max(0, b.originY);
-      const w = Math.min(vw, b.originX + b.width) - x;
-      const h = Math.min(vh, b.originY + b.height) - y;
-      if (w > 2 && h > 2) dets.push({ x, y, w, h, score: d.categories[0]?.score ?? 0 });
-    }
+    // 1) Whole frame, every frame.
+    let dets: Detection[] = this.toDetections(this.detector.detectForVideo(v, ts).detections, 0, 0, vw, vh, 'full');
 
-    const tracks = this.tracker.update(dets);
+    // 2) Far-face mode: overlapping tiles (one per frame in rotation, or all of them).
+    const ran: Tile[] = [];
+    if (this.tiling.mode !== 'off' && this.tileCtx && this.tileCanvas) {
+      const key = `${vw}x${vh}`;
+      if (this.tilesFor !== key) {
+        this.tiles = computeTiles(vw, vh, this.tiling.cols ?? 3, this.tiling.rows ?? 2, this.tiling.overlap ?? 0.2);
+        this.tilesFor = key;
+      }
+      const todo = this.tiling.mode === 'max' ? this.tiles : [this.tiles[this.tileCursor++ % this.tiles.length]];
+      for (const tile of todo) {
+        if (this.tileCanvas.width !== tile.w || this.tileCanvas.height !== tile.h) {
+          this.tileCanvas.width = tile.w;
+          this.tileCanvas.height = tile.h;
+        }
+        // Crop of the live frame, analysed and overwritten by the next tile – never kept.
+        this.tileCtx.drawImage(v, tile.x, tile.y, tile.w, tile.h, 0, 0, tile.w, tile.h);
+        const found = this.tiling.tileDetector!.detect(this.tileCanvas).detections;
+        const minScore = this.tiling.tileMinScore ?? 0.6;
+        const local = this.toDetections(found, 0, 0, tile.w, tile.h, 'tile').filter(
+          (d) => d.score >= minScore && !touchesInnerEdge(d, tile, vw, vh),
+        );
+        for (const d of local) dets.push({ ...d, x: d.x + tile.x, y: d.y + tile.y });
+        ran.push(tile);
+      }
+      dets = mergeDetections(dets);
+    }
+    this.lastInferences = 1 + ran.length;
+
+    // A face counts as "missed" only if this frame could have seen it: big faces are visible
+    // to the full-frame pass; small ones only when their tile was analysed.
+    const minFull = fullFrameMinFace(vw, vh);
+    const expected =
+      this.tiling.mode === 'off'
+        ? undefined
+        : (b: Box) => {
+            if (Math.min(b.w, b.h) >= minFull) return true;
+            const cx = b.x + b.w / 2;
+            const cy = b.y + b.h / 2;
+            return ran.some((t) => cx >= t.x && cx <= t.x + t.w && cy >= t.y && cy <= t.y + t.h);
+          };
+
+    const tracks = this.tracker.update(dets, expected);
     const frame = this.tracker.frame;
     for (const t of tracks) {
-      if (t.misses > 0) {
+      if (!this.tracker.isVisible(t)) {
         t.quality = { level: 'red', reasons: ['lost'] };
         continue;
       }
+      if (t.unseen > 0) continue; // waiting for its tile: keep last quality
       if (frame - t.lastSharpAt >= SHARP_EVERY) this.measureFace(t);
       t.quality = classifyFace(
         { score: t.score, size: Math.min(t.box.w, t.box.h), sharpness: t.sharpness, brightness: t.brightness },
@@ -162,6 +239,27 @@ export class LiveScanEngine {
     }
   }
 
+  private toDetections(
+    raw: { boundingBox?: { originX: number; originY: number; width: number; height: number }; categories: { score: number }[] }[],
+    ox: number,
+    oy: number,
+    maxW: number,
+    maxH: number,
+    source: 'full' | 'tile',
+  ): Detection[] {
+    const out: Detection[] = [];
+    for (const d of raw) {
+      const b = d.boundingBox;
+      if (!b) continue;
+      const x = Math.max(0, b.originX);
+      const y = Math.max(0, b.originY);
+      const w = Math.min(maxW, b.originX + b.width) - x;
+      const h = Math.min(maxH, b.originY + b.height) - y;
+      if (w > 2 && h > 2) out.push({ x: x + ox, y: y + oy, w, h, score: d.categories[0]?.score ?? 0, source });
+    }
+    return out;
+  }
+
   /** Measures sharpness/brightness of one face from the current frame; pixels are discarded at once. */
   private measureFace(t: Track) {
     const { x, y, w, h } = t.box;
@@ -179,8 +277,10 @@ export class LiveScanEngine {
     this.frameBrightness = measurePixels(px.data, 32, 18).brightness;
   }
 
+  /** Faces shown and counted: confirmed (seen in several checks) and currently visible.
+   * Unconfirmed one-off detections are never shown or counted. */
   private visible(tracks: Track[]) {
-    return tracks.filter((t) => t.misses === 0);
+    return tracks.filter((t) => t.confirmed && this.tracker.isVisible(t));
   }
 
   private buildStats(now: number): ScanStats {
@@ -203,6 +303,8 @@ export class LiveScanEngine {
       elapsedMs: now - this.startedAt,
       videoW: this.video.videoWidth,
       videoH: this.video.videoHeight,
+      inferencesPerFrame: this.lastInferences,
+      facesViaTiles: visible.filter((t) => t.source === 'tile').length,
     };
   }
 
@@ -222,8 +324,8 @@ export class LiveScanEngine {
     ctx.font = '600 13px system-ui, -apple-system, sans-serif';
     ctx.textBaseline = 'bottom';
     for (const t of tracks) {
-      const lost = t.misses > 0;
-      if (lost && !t.confirmed) continue;
+      if (!t.confirmed) continue; // one-off detections are not drawn (avoids false-positive flashes)
+      const lost = !this.tracker.isVisible(t);
       const level = t.quality?.level ?? 'yellow';
       const r = mapContain(t.box, vw, vh, cw, ch);
       ctx.strokeStyle = COLORS[level];
