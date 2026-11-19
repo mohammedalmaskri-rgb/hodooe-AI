@@ -89,14 +89,15 @@ export function LiveScan() {
         // Load the model (cached between sessions) and open the camera in parallel.
         const detPromise = (async () => {
           const cached = detRef.current;
-          if (cached?.key === key && (settings.far === 'off' || cached.tile)) return { ...cached.loaded, loadMs: 0, tile: cached.tile };
+          if (cached?.key === key && cached.tile) return { ...cached.loaded, loadMs: 0, tile: cached.tile };
           cached?.loaded.detector.close();
           cached?.tile?.detector.close();
           detRef.current = null;
           const base = { model: settings.model, delegate: settings.delegate, minConfidence: 0.4 };
           const [loaded, tile] = await Promise.all([
             loadDetector(base),
-            settings.far === 'off' ? undefined : loadDetector({ ...base, runningMode: 'IMAGE' }),
+            // Second instance (IMAGE mode): tiles + centred re-check of uncertain candidates.
+            loadDetector({ ...base, runningMode: 'IMAGE' }),
           ]);
           detRef.current = { key, loaded, tile };
           return { ...loaded, tile };
@@ -200,6 +201,10 @@ export function LiveScan() {
       resolution: `${stats.videoW}x${stats.videoH}`,
       distinctFaces: stats.uniqueFaces,
       maxSimultaneous: stats.maxSimultaneous,
+      relinked: stats.relinked,
+      tileGrid: stats.tileCount,
+      lastInferencesPerFrame: stats.inferencesPerFrame,
+      jsHeapMB: stats.heapMB ?? null,
       lostEvents: stats.lostEvents,
       stoppedReason: notice || 'user',
     };
@@ -328,6 +333,7 @@ export function LiveScan() {
               [t('scan.stats.duration'), fmtDur(stats.elapsedMs)],
               [t('scan.stats.unique'), stats.uniqueFaces],
               [t('scan.stats.maxFaces'), stats.maxSimultaneous],
+              [t('scan.stats.relinked'), stats.relinked],
               [t('scan.stats.lost'), stats.lostEvents],
               [t('scan.stats.frames'), stats.frames],
               [t('scan.stats.avgMs'), `${stats.sessionAvgMs.toFixed(1)} ms`],
@@ -337,6 +343,8 @@ export function LiveScan() {
               [t('scan.stats.resolution'), `${stats.videoW}×${stats.videoH}`],
               [t('scan.far'), t(`scan.far${settings.far === 'off' ? 'Off' : settings.far === 'max' ? 'Max' : 'Balanced'}`)],
               [t('scan.model'), settings.model === 'full' ? t('scan.modelFull') : t('scan.modelShort')],
+              [t('scan.stats.tiles'), `${stats.tileCount}`],
+              ...(stats.heapMB !== undefined ? [[t('scan.stats.heap'), `${stats.heapMB} MB`]] : []),
             ].map(([k, v]) => (
               <div key={String(k)} className="flex flex-col">
                 <dt className="text-xs text-slate-500">{k}</dt>

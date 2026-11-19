@@ -11,6 +11,8 @@ export interface Detection extends Box {
   score: number;
   /** Which pass found it: whole frame or a tile (far-face mode). */
   source?: 'full' | 'tile';
+  /** Below the strong-confidence level: may only become a counted face after verification. */
+  weak?: boolean;
 }
 
 export type QualityLevel = 'green' | 'yellow' | 'red';

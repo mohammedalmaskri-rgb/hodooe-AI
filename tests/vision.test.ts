@@ -175,3 +175,136 @@ describe('tiling', () => {
     expect(tr.stats.lostEvents).toBe(1);
   });
 });
+
+import { estimateShift } from '../src/vision/motion';
+
+describe('camera motion & position memory', () => {
+  /** Smooth random texture, shifted by (dx, dy). */
+  function texture(w: number, h: number, dx: number, dy: number) {
+    const out = new Float32Array(w * h);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const X = x - dx;
+        const Y = y - dy;
+        out[y * w + x] = Math.sin(X * 0.37) * 40 + Math.cos(Y * 0.29) * 30 + Math.sin((X + Y) * 0.11) * 50 + Math.cos(X * 0.13 - Y * 0.21) * 35;
+      }
+    return out;
+  }
+
+  it('estimates integer and sub-pixel shifts', () => {
+    const a = texture(80, 45, 0, 0);
+    const s1 = estimateShift(a, texture(80, 45, 3, -2), 80, 45, 7)!;
+    expect(s1.dx).toBeCloseTo(3, 0);
+    expect(s1.dy).toBeCloseTo(-2, 0);
+    const s2 = estimateShift(a, texture(80, 45, 2.5, 0), 80, 45, 7)!;
+    expect(Math.abs(s2.dx - 2.5)).toBeLessThan(0.35);
+  });
+
+  it('returns null for a flat image (no texture to track)', () => {
+    const flat = new Float32Array(80 * 45);
+    expect(estimateShift(flat, flat, 80, 45, 7)).toBeNull();
+  });
+
+  it('with camera motion, 40 faces seen only every 6th frame keep their numbers during a fast pan', () => {
+    const tr = new FaceTracker({ ...DEFAULT_TRACKER, maxVisibleUnseen: 6, maxUnseen: 14 });
+    const seats = Array.from({ length: 40 }, (_, i) => ({ x: (i % 10) * 90, y: Math.floor(i / 10) * 90 }));
+    for (let f = 0; f < 60; f++) {
+      const pan = f * 12; // camera pans 12 px/frame (fast)
+      const visit = f % 6 === 0;
+      const dets = visit ? seats.map((s) => ({ x: s.x - pan + 1000, y: s.y + 100, w: 30, h: 30, score: 0.9 })) : [];
+      tr.update(dets, () => visit, f === 0 ? null : { dx: -12, dy: 0 });
+    }
+    expect(tr.stats.uniqueFaces).toBe(40);
+  });
+
+  it('without motion info the same scenario re-counts faces (shows why motion matters)', () => {
+    const tr = new FaceTracker({ ...DEFAULT_TRACKER, maxVisibleUnseen: 6, maxUnseen: 14, memoryFrames: 0 });
+    const seats = Array.from({ length: 40 }, (_, i) => ({ x: (i % 10) * 90, y: Math.floor(i / 10) * 90 }));
+    for (let f = 0; f < 60; f++) {
+      const pan = f * 12;
+      const visit = f % 6 === 0;
+      const dets = visit ? seats.map((s) => ({ x: s.x - pan + 1000, y: s.y + 100, w: 30, h: 30, score: 0.9 })) : [];
+      tr.update(dets, () => visit, null);
+    }
+    expect(tr.stats.uniqueFaces).toBeGreaterThan(40);
+  });
+
+  it('re-links a face that leaves the view and comes back (sweep there and back)', () => {
+    const tr = new FaceTracker();
+    const face = (camX: number) => ({ x: 500 - camX, y: 300, w: 60, h: 60, score: 0.9 });
+    let cam = 0;
+    const step = (dx: number) => {
+      cam += dx;
+      const f = face(cam);
+      const inView = f.x > 0 && f.x + f.w < 1280;
+      tr.update(inView ? [f] : [], () => true, { dx: -dx, dy: 0 });
+    };
+    for (let i = 0; i < 10; i++) step(0); // seen
+    for (let i = 0; i < 80; i++) step(15); // pan right: face leaves on the left
+    for (let i = 0; i < 80; i++) step(-15); // pan back: face returns
+    for (let i = 0; i < 10; i++) step(0);
+    expect(tr.stats.lostEvents).toBe(1);
+    expect(tr.stats.relinked).toBe(1);
+    expect(tr.stats.uniqueFaces).toBe(1);
+  });
+});
+
+describe('candidate verification', () => {
+  const weak = (x: number) => ({ x, y: 100, w: 40, h: 40, score: 0.5, weak: true });
+  it('a weak candidate is not counted until a centred re-check confirms it', () => {
+    const tr = new FaceTracker();
+    for (let f = 0; f < 5; f++) tr.update([weak(100)]);
+    expect(tr.stats.uniqueFaces).toBe(0);
+    tr.applyVerification(tr.tracks[0], true);
+    expect(tr.tracks[0].confirmed).toBe(true);
+    expect(tr.stats.uniqueFaces).toBe(1);
+  });
+  it('a candidate that fails two re-checks is dropped without ever being counted', () => {
+    const tr = new FaceTracker();
+    tr.update([weak(100)]);
+    tr.applyVerification(tr.tracks[0], false);
+    tr.applyVerification(tr.tracks[0], false);
+    tr.update([weak(100)]); // dropped; the same spot may start a fresh candidate
+    expect(tr.stats.uniqueFaces).toBe(0);
+    expect(tr.tracks.every((t) => t.verifyFails === 0)).toBe(true);
+  });
+  it('a strong detection verifies immediately', () => {
+    const tr = new FaceTracker();
+    for (let f = 0; f < 3; f++) tr.update([{ x: 100, y: 100, w: 40, h: 40, score: 0.9 }]);
+    expect(tr.stats.uniqueFaces).toBe(1);
+  });
+});
+
+describe('duplicate prevention', () => {
+  it('a fresh track of a face whose old track went stale takes over the old number', () => {
+    const tr = new FaceTracker({ ...DEFAULT_TRACKER, maxVisibleUnseen: 12, maxUnseen: 26 });
+    const f = { x: 300, y: 200, w: 40, h: 40, score: 0.9 };
+    for (let i = 0; i < 4; i++) tr.update([f]);
+    // old track drifts away (bad prediction) while unseen
+    tr.tracks[0].vx = 10; // ≈0.6 face width of drift over the unseen frames
+    for (let i = 0; i < 3; i++) tr.update([], () => false);
+    for (let i = 0; i < 4; i++) tr.update([f]); // same face detected again at its real place
+    expect(tr.stats.uniqueFaces).toBe(1);
+    expect(tr.tracks.filter((t) => t.confirmed)).toHaveLength(1);
+  });
+  it('two counted tracks on one face are merged and un-counted', () => {
+    const tr = new FaceTracker();
+    for (let i = 0; i < 3; i++) tr.update([{ x: 100, y: 100, w: 50, h: 50, score: 0.9 }, { x: 400, y: 100, w: 50, h: 50, score: 0.9 }]);
+    expect(tr.stats.uniqueFaces).toBe(2);
+    tr.tracks[1].box = { x: 104, y: 102, w: 50, h: 50 }; // second track wrongly jumps onto the first face
+    tr.update([{ x: 100, y: 100, w: 50, h: 50, score: 0.9 }]);
+    expect(tr.stats.merged).toBe(1);
+    expect(tr.stats.uniqueFaces).toBe(1);
+  });
+});
+
+describe('edge handling', () => {
+  it('a face cut by the frame edge is tracked but only counted once fully inside', () => {
+    const tr = new FaceTracker();
+    tr.setFrameSize(1280, 720);
+    for (let i = 0; i < 5; i++) tr.update([{ x: 0, y: 300, w: 50, h: 60, score: 0.9 }]); // touching left edge
+    expect(tr.stats.uniqueFaces).toBe(0);
+    for (let i = 0; i < 2; i++) tr.update([{ x: 20, y: 300, w: 60, h: 60, score: 0.9 }]); // fully inside
+    expect(tr.stats.uniqueFaces).toBe(1);
+  });
+});
